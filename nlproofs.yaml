@@ -10,7 +10,7 @@ dependencies:
   - cudatoolkit=11.3
   - pytorch=1.11.0
   - black
-  - torchmetrics
+  - torchmetrics==0.10.3
   - mypy
   - pytorch-lightning=1.6.3
   - ipython
