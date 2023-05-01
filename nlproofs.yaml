@@ -1,4 +1,4 @@
-name: nlproofs
+name: nlproofs2
 channels:
   - pytorch
   - huggingface
