@@ -17,6 +17,7 @@ from transformers import (
 from prover.evaluate import evaluate_entailmentbank, evaluate_ruletaker
 import openai
 from copy import copy
+import time
 
 # Some handcrafted heuristics for constraining the predicted proof steps.
 # They often make the proof graph less cluttered but do not improve the final performance.
@@ -117,8 +118,9 @@ class EntailmentWriter(pl.LightningModule):
         oracle_prover: Optional[bool] = False,
         oracle_verifier: Optional[bool] = False,
         gpt_prover: Optional[bool] = False,
-        gpt_context_size: Optional[int] = 10,
-        gpt_examples_file: Optional[str] = "examples.txt"
+        gpt_context_size: Optional[int] = 8,
+        gpt_examples_file: Optional[str] = "examples.txt",
+        gpt_model_name: Optional[str] = "gpt-3.5-turbo",
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
@@ -134,6 +136,7 @@ class EntailmentWriter(pl.LightningModule):
         self.oracle_prover = oracle_prover
         self.oracle_verifier = oracle_verifier
         self.gpt_prover = gpt_prover
+        self.gpt_model_name = gpt_model_name
         self.queries=0
         if stepwise and verifier_weight > 0:
             assert verifier_weight <= 1.0
@@ -412,15 +415,18 @@ class EntailmentWriter(pl.LightningModule):
         gpt_message = copy(self.gpt_base)
         gpt_message.append({"role": "user", "content": input_text[0]})
 
-        output_text = []
+        output_text = [[]]
         
         for i in range(self.topk):
-            output_text.append(openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
+            output_text[0].append(openai.ChatCompletion.create(
+                model=self.gpt_model_name,
                 messages=gpt_message,
             )["choices"][0]["message"]["content"])
 
-        output_scores = np.ones(self.topk)
+            # Wait 3 seconds for rate limit
+            time.sleep(3)
+
+        output_scores = [np.ones(self.topk)]
 
         return output_text, output_scores
 
@@ -532,7 +538,7 @@ class EntailmentWriter(pl.LightningModule):
                 )
             elif self.gpt_prover:
                 output_text, output_scores = self.generate_gpt_proof_step(
-                    input_text, proof_gt
+                    input_text
                 )
             else:
                 output_text, output_scores = self.generate_proof_step(input_text)

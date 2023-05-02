@@ -476,7 +476,7 @@ class ProofDataModule(pl.LightningDataModule):
         return DataLoader(
             self.ds_val,
             self.batch_size,
-            shuffle=False,
+            shuffle=True,
             num_workers=self.num_workers,
             collate_fn=self.ds_val.collate,
             pin_memory=True,
@@ -487,7 +487,7 @@ class ProofDataModule(pl.LightningDataModule):
         return DataLoader(
             self.ds_test,
             self.batch_size,
-            shuffle=False,
+            shuffle=True,
             num_workers=self.num_workers,
             collate_fn=self.ds_test.collate,
             pin_memory=True,
