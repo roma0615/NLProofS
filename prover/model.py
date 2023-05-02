@@ -15,7 +15,8 @@ from transformers import (
     LogitsProcessor,
 )
 from prover.evaluate import evaluate_entailmentbank, evaluate_ruletaker
-
+import openai
+from copy import copy
 
 # Some handcrafted heuristics for constraining the predicted proof steps.
 # They often make the proof graph less cluttered but do not improve the final performance.
@@ -115,6 +116,9 @@ class EntailmentWriter(pl.LightningModule):
         verifier_ckpt: Optional[str] = None,
         oracle_prover: Optional[bool] = False,
         oracle_verifier: Optional[bool] = False,
+        gpt_prover: Optional[bool] = False,
+        gpt_context_size: Optional[int] = 10,
+        gpt_examples_file: Optional[str] = "examples.txt"
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
@@ -129,6 +133,8 @@ class EntailmentWriter(pl.LightningModule):
         self.proof_search = proof_search
         self.oracle_prover = oracle_prover
         self.oracle_verifier = oracle_verifier
+        self.gpt_prover = gpt_prover
+        self.queries=0
         if stepwise and verifier_weight > 0:
             assert verifier_weight <= 1.0
             assert verifier_ckpt is not None
@@ -147,6 +153,15 @@ class EntailmentWriter(pl.LightningModule):
             self.seq2seq = BartForConditionalGeneration.from_pretrained(model_name)
         else:
             raise NotImplementedError
+        
+        # Reads the JSON file gpt_examples_file and stores each line as an example.
+        with open(gpt_examples_file) as f:
+            gpt_examples = [json.loads(line) for line in f]
+        
+        self.gpt_base = [{"role": "system", "content": "You are an automated proof solver that generates the next step in a proof given a hypothesis and previous steps taken."}]
+        for i in range(gpt_context_size):
+            self.gpt_base.append({"role": "user", "content": gpt_examples[i]['input_seq']})
+            self.gpt_base.append({"role": "assistant", "content": gpt_examples[i]['output_seq']})
 
     def forward(  # type: ignore
         self,
@@ -386,6 +401,29 @@ class EntailmentWriter(pl.LightningModule):
 
         return output_text, output_scores
 
+    def generate_gpt_proof_step(
+            self,
+            input_text: List[str],
+    ) -> Tuple[List[str], List[float]]:
+        """
+        GPT prover.
+        """
+
+        gpt_message = copy(self.gpt_base)
+        gpt_message.append({"role": "user", "content": input_text[0]})
+
+        output_text = []
+        
+        for i in range(self.topk):
+            output_text.append(openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=gpt_message,
+            )["choices"][0]["message"]["content"])
+
+        output_scores = np.ones(self.topk)
+
+        return output_text, output_scores
+
     def calculate_score(
         self,
         proof_steps: List[List[ProofStep]],
@@ -490,6 +528,10 @@ class EntailmentWriter(pl.LightningModule):
             ]
             if self.oracle_prover:
                 output_text, output_scores = self.generate_oracle_proof_step(
+                    input_text, proof_gt
+                )
+            elif self.gpt_prover:
+                output_text, output_scores = self.generate_gpt_proof_step(
                     input_text, proof_gt
                 )
             else:

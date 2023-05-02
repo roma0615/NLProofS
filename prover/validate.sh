@@ -18,4 +18,4 @@ python main.py fit --config cli_task2_stepwise_t5-small.yaml
 # python main.py validate --config cli_task2_stepwise_t5-large.yaml --ckpt_path /n/fs/484-nlproofs/weights/task2_prover.ckpt --model.verifier_weight 0.5 --model.verifier_ckpt /n/fs/484-nlproofs/weights/task2_verifier.ckpt --model.proof_search true --model.oracle_prover true
 
 # Validate NLProofS (gpt prover + verifier-guided search).
-python main.py validate --config cli_task2_stepwise_t5-large.yaml --ckpt_path /n/fs/484-nlproofs/weights/task2_prover.ckpt --model.verifier_weight 0.5 --model.verifier_ckpt /n/fs/484-nlproofs/weights/task2_verifier.ckpt --model.proof_search true --model.gpt_prover true
+python main.py validate --config cli_task2_stepwise_t5-large.yaml --ckpt_path /n/fs/484-nlproofs/weights/task2_prover.ckpt --model.verifier_weight 0.5 --model.verifier_ckpt /n/fs/484-nlproofs/weights/task2_verifier.ckpt --model.proof_search true --model.gpt_prover true --trainer.limit_val_batches 10

@@ -10,7 +10,7 @@ import itertools
 from torch.utils.data import Dataset, DataLoader
 import pytorch_lightning as pl
 from transformers import AutoTokenizer
-
+import os
 
 def read_entailmentbank_proofs(path: str, is_train: bool) -> List[Example]:
     """
@@ -231,10 +231,25 @@ class StepwiseDataset(Dataset):  # type: ignore
 
     def __getitem__(self, idx: int) -> Example:
         ex = self.data[idx]
+
         if self.is_train:
-            return self.get_example_train(ex)
+            item = self.get_example_train(ex)
+            
+            # Creates a copy of 'item' dict but only contains keys 'input_seq' and 'output_seq'
+            item_json = {k: item[k] for k in ['input_seq', 'output_seq']}
+
+            # Save 'item_json' to a file named 'example.txt' as a JSON object in the current directory.
+            if not os.path.exists('examples.txt'):
+                open('examples.txt', 'w').close()
+            
+            with open('examples.txt', 'a') as f:
+                json.dump(item_json, f)
+                f.write('\n')
+            
         else:
-            return self.get_example_eval(ex)
+            item = self.get_example_eval(ex)
+
+        return item
 
     def collate(self, examples: List[Example]) -> Batch:
         inp = [ex["input_seq"] for ex in examples]
