@@ -24,6 +24,9 @@ class ProofGraph:
         self.eps = eps
 
     def initialize(self, proof_steps: List[ProofStep], scores: List[float]):
+        """
+        Add proof steps to the graph and expand it accordingly
+        """
         if len(proof_steps) == 0:
             return
         assert len(proof_steps) == len(scores)
@@ -31,38 +34,60 @@ class ProofGraph:
         for step, score in zip(proof_steps, scores):
             self.expand(step, score)
 
-    def sample_proof_tree(self, exclude: Set[str]) -> Optional[str]:
+    def sample_proof_tree(self, exclude: Set[str]) -> Tuple[Optional[str], Optional[Dict[str, str]]]:
         """
         Sample a new partial proof tree not in `exclude`.
         """
         reachable_nodes = set()
-        for node in self.assumptions:
+        for node in self.assumptions: # context.keys()
             reachable_nodes.update(nx.descendants(self.graph, node))
         reachable_component = nx.subgraph(self.graph, reachable_nodes)
 
         hypothesis_score = self.graph.nodes["hypothesis"]["score"]
 
+        # appendix E
         for _ in range(10):
             partial_proof = ""
             nodes_included = set()
             for node in reversed(list(nx.topological_sort(reachable_component))):
+                # successors before predecessors
                 if (
-                    node == "hypothesis"
-                    or node in nodes_included
+                    node == "hypothesis" # dont add hypothesis 
+                    or node in nodes_included # dont add if its already been added
                     or self.graph.nodes[node]["score"] <= hypothesis_score + self.eps
                 ):
                     continue
 
                 subproof = self.extract_proof(node, nodes_proved=nodes_included) + " "
-                if random.random() < 0.5:  # Include node.
+                if random.random() < 0.5: # include this node at random 
                     partial_proof += subproof
                     nodes_included.add(node)
-                    nodes_included.update(nx.ancestors(self.graph, node))
-            prf = rename_ints(partial_proof.strip())
+                    nodes_included.update(nx.ancestors(self.graph, node)) # (and all its ancestors, ie predecessors, ie facts that lead to this fact)
+            print("Partial proof before renaming:", partial_proof)
+            prf, rename_mapping = rename_ints(partial_proof.strip()) # i think the renaming is breaking the alignment
+            print("Prf (after renaming):", prf)
             if prf not in exclude:
-                return prf
+                # return this proof and the nodes with no descendants
+                # SOMETHINGS UP W THE NAMING ITS NOT WOKRING
+                last_generated_nodes = set()
+                nodes_seen = set()
+                for node in reversed(list(nx.topological_sort(reachable_component))):
+                    if node in nodes_included and node not in nodes_seen:
+                        # this is a node that has no descendants (since we're going in reverse topological order)
+                        # like A in our whiteboard diagram
+                        print(f"Adding {node} to last_generated_nodes")
+                        last_generated_nodes.add(node)
+                        print(f"Adding {node} and its ancestors to seen")
+                        nodes_seen.add(node)
+                        nodes_seen.update(nx.ancestors(self.graph, node))
+                # at this point, we have a set of nodes that are each at the top of their upside down trees
+                # apply the renaming
+                last_generated_nodes = { rename_mapping[x].replace("INT", "int") for x in last_generated_nodes }
+                # now its a dictionary from identifier to the sentence
+                last_generated_nodes = { x: self.graph.nodes[x]["sent"] for x in last_generated_nodes }
+                return prf, last_generated_nodes
 
-        return None
+        return None, None
 
     def extract_proof(
         self, node: str, rename: bool = False, nodes_proved: Set[str] = set()
@@ -81,10 +106,16 @@ class ProofGraph:
                     return "INVALID_PROOF"
 
         if rename:
-            proof = rename_ints(proof)
+            proof, _ = rename_ints(proof)
         return proof.strip()
 
     def extract_proof_step(self, node: str) -> str:
+        '''
+        Return the step that leads to this node
+        will look like
+        pred1 & pred2 -> int1: blahblah
+        where pred1 and pred2 are predecessors
+        '''
         assert node == "hypothesis" or node in self.intermediates
         predecessors = list(self.graph.predecessors(node))
         if len(predecessors) == 0:
@@ -135,7 +166,9 @@ class ProofGraph:
                 self.intermediates.add(dst)
                 self.sent2node[sent] = dst
 
-        # Add edges from the premises.
+        # TODO MIGHT NEED TO CREATE NEW NODE FOR NEWLY FETCHED PREMISES AS WELL
+
+        # Add edges from the premises. # TODO what does this do :(
         for p in premises:
             if p.startswith("sent"):
                 assert p in self.assumptions

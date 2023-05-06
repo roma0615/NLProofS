@@ -15,6 +15,7 @@ from transformers import (
     LogitsProcessor,
 )
 from prover.evaluate import evaluate_entailmentbank, evaluate_ruletaker
+from prover.retrievals import DragonIterativeRetriever, SimCSEIterativeRetriever, ContrieverIterativeRetriever
 
 
 # Some handcrafted heuristics for constraining the predicted proof steps.
@@ -112,6 +113,8 @@ class EntailmentWriter(pl.LightningModule):
         max_input_len: int,
         proof_search: bool,
         verifier_weight: float,
+        iterative_retriever: Optional[str] = None,
+        retriever_params: Optional[Dict[str, str]] = None,
         verifier_ckpt: Optional[str] = None,
         oracle_prover: Optional[bool] = False,
         oracle_verifier: Optional[bool] = False,
@@ -135,6 +138,17 @@ class EntailmentWriter(pl.LightningModule):
             self.verifiers = [
                 EntailmentClassifier.load_from_checkpoint(verifier_ckpt)
             ]  # Avoid making the verifier a submodule.
+
+        assert iterative_retriever in (None, "simcse", "dragon", "contriever")
+        self.retriever = None
+        if iterative_retriever == "simcse":
+            self.retriever = SimCSEIterativeRetriever(**retriever_params)
+        elif iterative_retriever == "dragon":
+            self.retriever = DragonIterativeRetriever(**retriever_params)
+        elif iterative_retriever == "contriever":
+            self.retriever = ContrieverIterativeRetriever(**retriever_params)
+        else:
+            print("Not using iterative retriever")
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, model_max_length=max_input_len)
         if (
@@ -213,10 +227,10 @@ class EntailmentWriter(pl.LightningModule):
         Stepwise proof generation.
         """
         proof_pred, step_scores = self.generate_greedy_proofs(proof_gt)
-        if not self.proof_search:
+        if not self.proof_search: # no proof search
             proof_text_pred = [pt.proof_text for pt in proof_pred]
             score = [min(s) if len(s) > 0 else 0.0 for s in step_scores]
-        else:
+        else: # proof search
             batch_size = len(proof_gt)
             proof_text_pred = []
             score = []
@@ -382,7 +396,7 @@ class EntailmentWriter(pl.LightningModule):
                         conclusion = f"int: {step.conclusion_sent}"
                     text = f"{premises} -> {conclusion};"
                     output_text[i].append(text)
-                    output_scores[i] = np.append(output_scores[i], 1.0)
+                    output_scores[i] = np.append(output_scores[i], 1.0) # hardcode oracle score of 1.0?
 
         return output_text, output_scores
 
@@ -466,34 +480,81 @@ class EntailmentWriter(pl.LightningModule):
 
         return verifier_scores
 
-    def search_proof(
+    def search_proof( # implementation of Alg 1. READ THIS
         self,
         proof_gt: Proof,
         proof_greedy: Proof,
         step_scores_greedy: List[float],
     ) -> Tuple[str, float]:
+        debug = False # SET TO FALSE if not debugging
+        testing = os.getenv("DEBUG") is not None
+        if testing:
+            print("@=== DEBUGGING ===@")
+            # debug = len(step_scores_greedy) >= 3 # only pause if an interesting proof
+            # debug = "paleontologists study the history" in proof_gt.proof_text
+            debug = "the plants in the gardens are located outside" in proof_gt.proof_text
         context, hypothesis = proof_gt.context, proof_gt.hypothesis
-        pg = ProofGraph(context, hypothesis)
-        pg.initialize(proof_greedy.proof_steps, step_scores_greedy)
+        # context = the supporting facts (C from alg 1)
+        pg = ProofGraph(context, hypothesis) # ISSUE: how to update proof graph context
+        pg.initialize(proof_greedy.proof_steps, step_scores_greedy) # greedy graph
 
-        explored_proofs: Set[str] = set()
-        context_text = proof_gt.serialize_context()
+        if debug:
+            print("PROOF GT", proof_gt)
+            print("PROOF GREEDY", proof_greedy)
+            print("STEP SCORES GREEDY", step_scores_greedy)
 
+        explored_proofs: Set[str] = set() # line 6 of alg 1
+        context_text = proof_gt.serialize_context() # why using ground truth????
+
+        # TODO: we want to generate new set of (fixed) k relevant facts, at each proof graph expansion
+
+        i = 0
         while True:
-            partial_proof = pg.sample_proof_tree(explored_proofs)
+            i += 1
+            if debug:
+                print("WRITING CURRENT PROOF GRAPH")
+                pg.visualize(f"viz_{i}")
+                input()
+            partial_proof, last_generated_nodes = pg.sample_proof_tree(explored_proofs)
             if partial_proof is None:
                 break
+            if debug:
+                print("Partial proof:", partial_proof)
+                print("LAST GENERATED NODES: ", last_generated_nodes)
             explored_proofs.add(partial_proof)
 
+            # TODO: using partial proof, retrieve an additional set of k relevant context from corpus
+            # using these last_generated_nodes, go get their sentence embeddings
+            # and combined with hypothesis, find top k relevant sentences from worldtree corpus
+            # this can kick off to another module/class thing
+
+            # something like
+            to_encode = set(last_generated_nodes.values()) # values are the actual sentences
+            to_encode.add(hypothesis)
+            closest_corpus = self.retriever.top_k(to_encode) # a dictionary
+            print(closest_corpus)
+            # ^ where to initialize retriever??? i think this belongs in the model
+            
+
+            # NOTE: can we just inject the additional fetched context after the static context_text
+            # right now, context doesn't change
+            # TODO NOTE: i think we can just add the fetched context here yeah
             input_text = [
                 f"$hypothesis$ = {hypothesis} ; $context$ = {context_text} ; $proof$ = {partial_proof}"
             ]
+            if debug:
+                print("INPUT TEXT:", input_text)
             if self.oracle_prover:
                 output_text, output_scores = self.generate_oracle_proof_step(
                     input_text, proof_gt
                 )
             else:
-                output_text, output_scores = self.generate_proof_step(input_text)
+                # 
+                output_text, output_scores = self.generate_proof_step(input_text) # transformers
+
+            if debug:
+                print("Generated proof step:", output_text, " score:", output_scores)
+
             proof_steps, prover_scores = self.filter_invalid_steps(
                 output_text,
                 output_scores,
@@ -509,6 +570,10 @@ class EntailmentWriter(pl.LightningModule):
             proof_steps = list(itertools.chain.from_iterable(proof_steps))
             scores = list(itertools.chain.from_iterable(scores))
 
+            if debug:
+                print("Proof steps from this iteration:", proof_steps)
+                input()
+
             graph_updated = False
             for ps, s in zip(proof_steps, scores):
                 if pg.expand(ps, s):
@@ -517,6 +582,9 @@ class EntailmentWriter(pl.LightningModule):
                 break
 
         proof = pg.extract_proof("hypothesis", rename=True)
+        if debug:
+            print("FINAL PROOF AFTER GRAPH SEARCH", proof) # it seems like its creating duplicates??
+            input()
         return proof, pg.graph.nodes["hypothesis"]["score"]
 
     def normalize_predicted_step(self, step: str, proof: Proof) -> str:
@@ -583,7 +651,7 @@ class EntailmentWriter(pl.LightningModule):
     def test_epoch_end(self, outputs: Iterable[Any]) -> None:
         return self.val_test_epoch_end("test", outputs)
 
-    def val_test_step(self, split: str, batch: Batch, batch_idx: int) -> Tuple[Any]:
+    def val_test_step(self, split: str, batch: Batch, batch_idx: int) -> Tuple[Any]: # TODO WE GOTTA EDIT THIS TO INJECT ITERATIVE RETRIEVAL. add prints 
         if self.stepwise:
             proof_pred, score = self.generate_stepwise_proof(batch["proof"], batch_idx)
         else:

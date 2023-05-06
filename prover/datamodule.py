@@ -4,6 +4,7 @@ Dataloading for EntailmentBank and RuleTaker.
 from copy import deepcopy
 from common import *
 from prover.proof import Proof, InvalidProofStep
+from prover.retrievals import CustomRetriever, SimCSERetriever, DragonRetriever, ContrieverRetriever
 import random
 import json
 import itertools
@@ -12,7 +13,8 @@ import pytorch_lightning as pl
 from transformers import AutoTokenizer
 
 
-def read_entailmentbank_proofs(path: str, is_train: bool) -> List[Example]:
+
+def read_entailmentbank_proofs(path: str, is_train: bool, custom_retriever: CustomRetriever) -> List[Example]:
     """
     Load the EntailmentBank dataset.
     """
@@ -22,7 +24,13 @@ def read_entailmentbank_proofs(path: str, is_train: bool) -> List[Example]:
     for line in open(path):
         ex = json.loads(line)
         hypothesis = normalize(ex["hypothesis"])
-        context = extract_context(ex["context"])
+        # ex["context"]. inject our own retrieval here if simcse_embeddings is not None
+        context_obj = ex["context"]
+        # print("CONTEXT OBJ BEFORE SIMCSE", context_obj)
+        if custom_retriever:
+            context_obj = custom_retriever.top_k(ex)
+        # print("CONTEXT OBJ AFTER SIMCSE", context_obj)
+        context = extract_context(context_obj) # context is what needs to be replaced w retreived stuff
         proof_text = normalize(ex["proof"].strip())
         try:
             proof = Proof(
@@ -135,6 +143,7 @@ class EntireProofsDataset(Dataset):  # type: ignore
         max_input_len: int,
         max_output_len: int,
         is_train: bool,
+        custom_retriever: CustomRetriever = None,
     ) -> None:
         super().__init__()
         max_len = max(max_input_len, max_output_len)
@@ -142,8 +151,9 @@ class EntireProofsDataset(Dataset):  # type: ignore
         self.max_input_len = max_input_len
         self.max_output_len = max_output_len
         self.is_train = is_train
+        assert not (custom_retriever is not None and dataset == "ruletaker"), "Cannot run custom retrieval on ruletaker dataset"
         if dataset == "entailmentbank":
-            self.data = read_entailmentbank_proofs(path, is_train)
+            self.data = read_entailmentbank_proofs(path, is_train, custom_retriever)
         else:
             assert dataset == "ruletaker"
             self.data = read_ruletaker_proofs(path, is_train)
@@ -210,6 +220,7 @@ class StepwiseDataset(Dataset):  # type: ignore
         subtree_proved_prob: float,
         subtree_proved_all_or_none: bool,
         is_train: bool,
+        custom_retriever: CustomRetriever = None,
     ) -> None:
         super().__init__()
         max_len = max(max_input_len, max_output_len)
@@ -220,8 +231,9 @@ class StepwiseDataset(Dataset):  # type: ignore
         self.subtree_proved_prob = subtree_proved_prob
         self.subtree_proved_all_or_none = subtree_proved_all_or_none
         self.is_train = is_train
+        assert not (custom_retriever is not None and dataset == "ruletaker"), "Cannot run custom retrieval on ruletaker dataset"
         if dataset == "entailmentbank":
-            self.data = read_entailmentbank_proofs(path, is_train)
+            self.data = read_entailmentbank_proofs(path, is_train, custom_retriever)
         else:
             assert dataset == "ruletaker"
             self.data = read_ruletaker_proofs(path, is_train)
@@ -278,6 +290,7 @@ class StepwiseDataset(Dataset):  # type: ignore
 
         # Sample the proof step.
         tree = proof.to_tree()
+        # pick a random intermediate proof step
         int_node = random.choice(get_internal_nodes(tree))
 
         # Sample the goal.
@@ -291,6 +304,7 @@ class StepwiseDataset(Dataset):  # type: ignore
             goal_node = random.choice(ancestors)
 
         # Sample the partial proof.
+        # collect the "proved subtrees" that lead up to the chosen intermediate proof step
         proved_subtrees = [node for node in int_node.children if not node.is_leaf()]
         if int_node is not goal_node:
             unproved_child = int_node
@@ -356,6 +370,8 @@ class ProofDataModule(pl.LightningDataModule):
         path_test: str,
         subtree_proved_prob: float,
         subtree_proved_all_or_none: bool,
+        custom_retriever: Optional[str] = None,
+        retriever_params: Optional[Dict[str, str]] = None
     ) -> None:
         super().__init__()
         assert dataset in ("entailmentbank", "ruletaker")
@@ -372,11 +388,23 @@ class ProofDataModule(pl.LightningDataModule):
         self.path_test = path_test
         self.subtree_proved_prob = subtree_proved_prob
         self.subtree_proved_all_or_none = subtree_proved_all_or_none
+        assert custom_retriever in (None, "dragon", "simcse", "contriever")
+        self.custom_retriever = custom_retriever
+        self.retriever_params = retriever_params
 
     def prepare_data(self) -> None:
         pass
 
     def setup(self, stage: Optional[str] = None) -> None:
+        retriever = None
+        if self.custom_retriever is not None:
+            print("Using custom retriever", self.custom_retriever)
+            if self.custom_retriever == "dragon":
+                retriever = DragonRetriever(**self.retriever_params)
+            elif self.custom_retriever == "simcse":
+                retriever = SimCSERetriever(**self.retriever_params)
+            elif self.custom_retriever == "contriever":
+                retriever = ContrieverRetriever(**self.retriever_params)
         if stage in (None, "fit"):
             if self.stepwise:
                 self.ds_train = StepwiseDataset(
@@ -389,6 +417,7 @@ class ProofDataModule(pl.LightningDataModule):
                     self.subtree_proved_prob,
                     self.subtree_proved_all_or_none,
                     is_train=True,
+                    custom_retriever=retriever,
                 )
             else:
                 self.ds_train = EntireProofsDataset(  # type: ignore
@@ -398,6 +427,7 @@ class ProofDataModule(pl.LightningDataModule):
                     self.max_input_len,
                     self.max_output_len,
                     is_train=True,
+                    custom_retriever=retriever,
                 )
 
         if stage in (None, "fit", "validate"):
@@ -412,6 +442,7 @@ class ProofDataModule(pl.LightningDataModule):
                     self.subtree_proved_prob,
                     self.subtree_proved_all_or_none,
                     is_train=False,
+                    custom_retriever=retriever,
                 )
             else:
                 self.ds_val = EntireProofsDataset(  # type: ignore
@@ -421,6 +452,7 @@ class ProofDataModule(pl.LightningDataModule):
                     self.max_input_len,
                     self.max_output_len,
                     is_train=False,
+                    custom_retriever=retriever,
                 )
 
         if stage in (None, "test"):
@@ -435,6 +467,7 @@ class ProofDataModule(pl.LightningDataModule):
                     self.subtree_proved_prob,
                     self.subtree_proved_all_or_none,
                     is_train=False,
+                    custom_retriever=retriever,
                 )
             else:
                 self.ds_test = EntireProofsDataset(  # type: ignore
@@ -444,6 +477,7 @@ class ProofDataModule(pl.LightningDataModule):
                     self.max_input_len,
                     self.max_output_len,
                     is_train=False,
+                    custom_retriever=retriever,
                 )
 
     def train_dataloader(self) -> DataLoader:  # type: ignore

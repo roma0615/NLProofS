@@ -38,7 +38,7 @@ def extract_context(ctx: str) -> OrderedDict[str, str]:
         {
             ident.strip(): normalize_sentence(sent)
             for ident, sent in re.findall(
-                r"(?P<ident>sent\d+): (?P<sent>.+?) (?=sent)", ctx + " sent"
+                r"(?P<ident>sent\d+): (?P<sent>.+?) (?=sent\d)", ctx + " sent0"
             )
         }
     )
@@ -138,7 +138,7 @@ def get_internal_nodes(tree: Tree) -> List[TreeNode]:
     return [node for node in tree.traverse() if not node.is_leaf()]
 
 
-def rename_ints(proof: str) -> str:
+def rename_ints(proof: str) -> Tuple[str, Dict[str, str]]:
     """
     Rename the `int\d+` identifiers in a proof so that they increase from 1.
     """
@@ -155,7 +155,7 @@ def rename_ints(proof: str) -> str:
         mapping[s] = dst
         proof = proof.replace(f"{s}:", f"{dst}:").replace(f"{s} ", f"{dst} ")
 
-    return proof.replace("INT", "int")
+    return proof.replace("INT", "int"), mapping
 
 
 def get_optimizers(

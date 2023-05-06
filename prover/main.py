@@ -13,6 +13,7 @@ class CLI(LightningCLI):
 
 
 def main() -> None:
+    #           model               datamodule
     cli = CLI(EntailmentWriter, ProofDataModule, save_config_overwrite=True)
     print("Configuration: \n", cli.config)
 

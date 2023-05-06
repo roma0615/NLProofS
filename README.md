@@ -33,6 +33,7 @@ Conference on Empirical Methods in Natural Language Processing (EMNLP), 2022
 1. Download the OWA version of [RuleTaker](https://allenai.org/data/proofwriter) (MD5: bf490364bca241bb5ff9f0ab0c78b71a) and unzip it as `./data/proofwriter-dataset-V2020.12.3/`.
 1. Run `python check_data.py` to check.
 1. Run `python preprocess_ruletaker.py` to preprocess the RuleTaker dataset.
+1. Run `python preprocess_worldtree.py` to preprocess the WorldTree V2 corpus.
 
 
 ## EntailmentBank Experiments
@@ -75,7 +76,7 @@ python main.py validate --config cli_task2_stepwise_t5-large.yaml --ckpt_path PA
 python main.py validate --config cli_task2_stepwise_t5-large.yaml --ckpt_path PATH_TO_PROVER_CKPT --model.verifier_weight 1.0 --model.verifier_ckpt PATH_TO_VERIFIER_CKPT --model.proof_search true   # Validate NLProofS w/o prover score.
 python main.py test --config cli_task2_stepwise_t5-large.yaml --ckpt_path PATH_TO_PROVER_CKPT --model.verifier_weight 0.5 --model.verifier_ckpt PATH_TO_VERIFIER_CKPT --model.proof_search true       # Test NLProofS (stepwise prover + verifier-guided search).
 python main.py test --config cli_task1_single_shot_t5-large.yaml --ckpt_path PATH_TO_PROVER_CKPT                                                                                                   # Test the single-shot prover on Task 1 of EntailmentBank.
-python main.py test --confing cli_task2_single_shot_t5-large.yaml --ckpt_path PATH_TO_PROVER_CKPT --data.path_test ../data/entailment_trees_emnlp2021_data_v3/dataset/task_3/test.jsonl            # Test the single-shot prover (trained on Task 2) on Task 3 of EntailmentBank.
+python main.py test --config cli_task2_single_shot_t5-large.yaml --ckpt_path PATH_TO_PROVER_CKPT --data.path_test ../data/entailment_trees_emnlp2021_data_v3/dataset/task_3/test.jsonl            # Test the single-shot prover (trained on Task 2) on Task 3 of EntailmentBank.
 ```
 
 Validation and testing results are saved as `./prover/lightning_logs/EXP_ID/results_val.tsv` and `./prover/lightning_logs/EXP_ID/results_test.tsv`. They are the input to the [EntailmentBank's official evaluation code](https://github.com/allenai/entailment_bank/tree/71385b6d7cc42ac394006bc2fe84d5bd1117f9ac) for calculating the evaluation metrics.

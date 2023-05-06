@@ -70,7 +70,7 @@ def extract_proof(raw_proof: Dict[str, Any], name_map: Dict[str, str]) -> str:
                 proof_steps.append(ps)
 
     proof_steps[-1] = re.sub(r"-> int\d+: .+;$", "-> hypothesis;", proof_steps[-1])
-    proof = rename_ints(" ".join(proof_steps))
+    proof, _ = rename_ints(" ".join(proof_steps))
     return proof
 
 
