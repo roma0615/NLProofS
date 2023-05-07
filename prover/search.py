@@ -63,9 +63,9 @@ class ProofGraph:
                     partial_proof += subproof
                     nodes_included.add(node)
                     nodes_included.update(nx.ancestors(self.graph, node)) # (and all its ancestors, ie predecessors, ie facts that lead to this fact)
-            print("Partial proof before renaming:", partial_proof)
+            # print("Partial proof before renaming:", partial_proof)
             prf, rename_mapping = rename_ints(partial_proof.strip()) # i think the renaming is breaking the alignment
-            print("Prf (after renaming):", prf)
+            # print("Prf (after renaming):", prf)
             if prf not in exclude:
                 # return this proof and the nodes with no descendants
                 # SOMETHINGS UP W THE NAMING ITS NOT WOKRING
@@ -75,9 +75,9 @@ class ProofGraph:
                     if node in nodes_included and node not in nodes_seen:
                         # this is a node that has no descendants (since we're going in reverse topological order)
                         # like A in our whiteboard diagram
-                        print(f"Adding {node} to last_generated_nodes")
+                        # print(f"Adding {node} to last_generated_nodes")
                         last_generated_nodes.add(node)
-                        print(f"Adding {node} and its ancestors to seen")
+                        # print(f"Adding {node} and its ancestors to seen")
                         nodes_seen.add(node)
                         nodes_seen.update(nx.ancestors(self.graph, node))
                 # at this point, we have a set of nodes that are each at the top of their upside down trees

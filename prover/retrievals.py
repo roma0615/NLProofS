@@ -41,7 +41,7 @@ class DragonIterativeRetriever(IterativeRetriever):
         # determine the k closest sentences to hypothesis
         # cosine similarity 
         # scores[i] will be for a given thing
-        rest_of_corpus = 
+        rest_of_corpus = self.corpus
         scores = np.zeros((len(sentences), len()))
         scored = {}
         for i, emb in enumerate(self.embeddings):
@@ -175,18 +175,41 @@ class SimCSEIterativeRetriever(IterativeRetriever):
 # Import SimCSE models
 class SimCSERetriever(CustomRetriever):
 
-    def __init__(self, path_corpus: str, embeddings_path: str, k: int = 25):
-        assert path_corpus is not None
-        assert embeddings_path is not None
-        print(f"Initializing SimCSE retriever, k={k}")
-        self.tokenizer = AutoTokenizer.from_pretrained("princeton-nlp/sup-simcse-bert-base-uncased", use_fast=True) # use_fast = True, does this do anything.
-        self.model = AutoModel.from_pretrained("princeton-nlp/sup-simcse-bert-base-uncased")
-        self.corpus = self.load_corpus(path_corpus)
-        self.corpus_list = list(self.corpus)
-        self.embeddings = torch.load(embeddings_path)
+    def __init__(self, path_corpus: str = None, embeddings_path: str = None, path: str = None, k: int = 25):
+        assert ((path_corpus is not None and embeddings_path is not None) and path is None) \
+            or ((path_corpus is None and embeddings_path is None) and path is not None), \
+            "Must either provide path_corpus and embeddings_path, or path. But not both"
+        self.using_hardcoded = path is not None
         self.k = k
 
+        if self.using_hardcoded:
+            objs = []
+            print(f"Initializing SimCSE retriever (will read from file)")
+            with open(path, "r") as f: # jsonl
+                for l in f.readlines():
+                    objs.append(json.loads(l))
+            # create dictionary
+            self.hyp_to_context = { x["hypothesis"]: x["context"] for x in objs }
+        else:
+            print(f"Initializing SimCSE retriever, k={k}")
+            self.tokenizer = AutoTokenizer.from_pretrained("princeton-nlp/sup-simcse-bert-base-uncased", use_fast=True) # use_fast = True, does this do anything.
+            self.model = AutoModel.from_pretrained("princeton-nlp/sup-simcse-bert-base-uncased")
+            self.corpus = self.load_corpus(path_corpus)
+            self.corpus_list = list(self.corpus)
+            self.embeddings = torch.load(embeddings_path)
+
     def top_k(self, example: Example) -> str: # return a context string to be passed into extract_context
+        
+        if self.using_hardcoded:
+            hyp = example["hypothesis"]
+            context = self.hyp_to_context[hyp]
+            # number them
+            context = [f"sent{i+1}: {x}" for i, x in enumerate(context)]
+            # combine into one string
+            facts = " ".join(context)
+            return facts
+        
+        # if not hardcoded... : 
         # example is as found in the jsonl files
         # has context, question, answer, hypothesis, proof (empty for testing), meta obj
         # we only need to edit context given the hypothesis, and return a context string

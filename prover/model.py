@@ -529,10 +529,10 @@ class EntailmentWriter(pl.LightningModule):
             # this can kick off to another module/class thing
 
             # something like
-            to_encode = set(last_generated_nodes.values()) # values are the actual sentences
-            to_encode.add(hypothesis)
-            closest_corpus = self.retriever.top_k(to_encode) # a dictionary
-            print(closest_corpus)
+            # to_encode = set(last_generated_nodes.values()) # values are the actual sentences
+            # to_encode.add(hypothesis)
+            # closest_corpus = self.retriever.top_k(to_encode) # a dictionary
+            # print(closest_corpus)
             # ^ where to initialize retriever??? i think this belongs in the model
             
 
