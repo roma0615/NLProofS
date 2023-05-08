@@ -37,4 +37,4 @@ data:
   path_test: ../data/entailment_trees_emnlp2021_data_v3/dataset/task_3/test.jsonl
   custom_retriever: contriever
   retriever_params:
-    path: /n/fs/484-nlproofs/am6723/NLProofS/contriever_task3_dev_contexts.json
+    path: /n/fs/484-nlproofs/am6723/NLProofS/test_res/contriever_task3_test_contexts.json
