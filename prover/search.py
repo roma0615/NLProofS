@@ -166,9 +166,7 @@ class ProofGraph:
                 self.intermediates.add(dst)
                 self.sent2node[sent] = dst
 
-        # TODO MIGHT NEED TO CREATE NEW NODE FOR NEWLY FETCHED PREMISES AS WELL
-
-        # Add edges from the premises. # TODO what does this do :(
+        # Add edges from the premises.
         for p in premises:
             if p.startswith("sent"):
                 assert p in self.assumptions

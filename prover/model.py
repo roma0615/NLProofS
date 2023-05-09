@@ -15,7 +15,6 @@ from transformers import (
     LogitsProcessor,
 )
 from prover.evaluate import evaluate_entailmentbank, evaluate_ruletaker
-from prover.retrievals import DragonIterativeRetriever, SimCSEIterativeRetriever, ContrieverIterativeRetriever
 
 
 # Some handcrafted heuristics for constraining the predicted proof steps.
@@ -113,7 +112,6 @@ class EntailmentWriter(pl.LightningModule):
         max_input_len: int,
         proof_search: bool,
         verifier_weight: float,
-        iterative_retriever: Optional[str] = None,
         retriever_params: Optional[Dict[str, str]] = None,
         verifier_ckpt: Optional[str] = None,
         oracle_prover: Optional[bool] = False,
@@ -138,17 +136,6 @@ class EntailmentWriter(pl.LightningModule):
             self.verifiers = [
                 EntailmentClassifier.load_from_checkpoint(verifier_ckpt)
             ]  # Avoid making the verifier a submodule.
-
-        assert iterative_retriever in (None, "simcse", "dragon", "contriever")
-        self.retriever = None
-        if iterative_retriever == "simcse":
-            self.retriever = SimCSEIterativeRetriever(**retriever_params)
-        elif iterative_retriever == "dragon":
-            self.retriever = DragonIterativeRetriever(**retriever_params)
-        elif iterative_retriever == "contriever":
-            self.retriever = ContrieverIterativeRetriever(**retriever_params)
-        else:
-            print("Not using iterative retriever")
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, model_max_length=max_input_len)
         if (
@@ -495,7 +482,7 @@ class EntailmentWriter(pl.LightningModule):
             debug = "the plants in the gardens are located outside" in proof_gt.proof_text
         context, hypothesis = proof_gt.context, proof_gt.hypothesis
         # context = the supporting facts (C from alg 1)
-        pg = ProofGraph(context, hypothesis) # ISSUE: how to update proof graph context
+        pg = ProofGraph(context, hypothesis)
         pg.initialize(proof_greedy.proof_steps, step_scores_greedy) # greedy graph
 
         if debug:
@@ -504,9 +491,7 @@ class EntailmentWriter(pl.LightningModule):
             print("STEP SCORES GREEDY", step_scores_greedy)
 
         explored_proofs: Set[str] = set() # line 6 of alg 1
-        context_text = proof_gt.serialize_context() # why using ground truth????
-
-        # TODO: we want to generate new set of (fixed) k relevant facts, at each proof graph expansion
+        context_text = proof_gt.serialize_context()
 
         i = 0
         while True:
@@ -523,22 +508,6 @@ class EntailmentWriter(pl.LightningModule):
                 print("LAST GENERATED NODES: ", last_generated_nodes)
             explored_proofs.add(partial_proof)
 
-            # TODO: using partial proof, retrieve an additional set of k relevant context from corpus
-            # using these last_generated_nodes, go get their sentence embeddings
-            # and combined with hypothesis, find top k relevant sentences from worldtree corpus
-            # this can kick off to another module/class thing
-
-            # something like
-            # to_encode = set(last_generated_nodes.values()) # values are the actual sentences
-            # to_encode.add(hypothesis)
-            # closest_corpus = self.retriever.top_k(to_encode) # a dictionary
-            # print(closest_corpus)
-            # ^ where to initialize retriever??? i think this belongs in the model
-            
-
-            # NOTE: can we just inject the additional fetched context after the static context_text
-            # right now, context doesn't change
-            # TODO NOTE: i think we can just add the fetched context here yeah
             input_text = [
                 f"$hypothesis$ = {hypothesis} ; $context$ = {context_text} ; $proof$ = {partial_proof}"
             ]
@@ -651,7 +620,7 @@ class EntailmentWriter(pl.LightningModule):
     def test_epoch_end(self, outputs: Iterable[Any]) -> None:
         return self.val_test_epoch_end("test", outputs)
 
-    def val_test_step(self, split: str, batch: Batch, batch_idx: int) -> Tuple[Any]: # TODO WE GOTTA EDIT THIS TO INJECT ITERATIVE RETRIEVAL. add prints 
+    def val_test_step(self, split: str, batch: Batch, batch_idx: int) -> Tuple[Any]:
         if self.stepwise:
             proof_pred, score = self.generate_stepwise_proof(batch["proof"], batch_idx)
         else:
